@@ -23,9 +23,10 @@ st.set_page_config(
 )
 
 from docx import Document
+from docx.enum.dml import MSO_THEME_COLOR_INDEX
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH as WD_PARAGRAPH_ALIGNMENT
-from docx.shared import Cm, Inches, Pt
+from docx.shared import Cm, Inches, Pt, RGBColor
 from dotenv import load_dotenv
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -94,22 +95,44 @@ class FormatRulesExtractor:
         """Menggunakan AI untuk ekstrak aturan format"""
 
         # Load dokumen
-        loader = Docx2txtLoader(document_path)
-        documents = loader.load()
-
-        # Gabungkan semua dokumen menjadi satu teks
-        full_text = "\\n".join([doc.page_content for doc in documents])
+        try:
+            if document_path.lower().endswith(".txt"):
+                # Handle .txt files
+                with open(document_path, "r", encoding="utf-8") as f:
+                    full_text = f.read()
+                st.markdown(
+                    '<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">📄 File .txt berhasil dimuat</p>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                # Handle .docx files
+                loader = Docx2txtLoader(document_path)
+                documents = loader.load()
+                full_text = "\\n".join([doc.page_content for doc in documents])
+                st.markdown(
+                    '<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">📄 File .docx berhasil dimuat</p>',
+                    unsafe_allow_html=True,
+                )
+        except Exception as e:
+            st.error(f"❌ Error loading document: {str(e)}")
+            return self._create_fallback_rules()
 
         # Cek cache terlebih dahulu
         cache_key = self._get_cache_key(full_text)
         cached_result = self._load_from_cache(cache_key)
         if cached_result:
-            st.info("📋 Menggunakan hasil dari cache...")
+            st.markdown(
+                '<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">📋 Menggunakan hasil dari cache...</p>',
+                unsafe_allow_html=True,
+            )
             return cached_result
 
         # Jika teks terlalu panjang, potong ke 12000 karakter pertama
         if len(full_text) > 12000:
             full_text = full_text[:12000] + "..."
+            st.warning(f"📏 Dokumen dipotong ke {len(full_text)} karakter pertama")
+
+        st.info(f"📊 Memproses {len(full_text)} karakter teks...")
 
         # Prompt yang lebih komprehensif dan detail
         prompt = f"""
@@ -151,11 +174,15 @@ class FormatRulesExtractor:
             response = None
             for attempt in range(3):
                 try:
+                    st.info(f"🤖 Mengirim ke Gemini AI... (Percobaan {attempt + 1}/3)")
                     response = self.llm.invoke(messages)
+                    st.success("✅ Response diterima dari Gemini AI")
                     break
                 except Exception as e:
                     if attempt == 2:
+                        st.error(f"❌ Semua percobaan gagal: {str(e)}")
                         raise e
+                    st.warning(f"⚠️ Percobaan {attempt + 1} gagal, mencoba lagi...")
                     time.sleep(2)  # Wait before retry
 
             if not response:
@@ -164,15 +191,26 @@ class FormatRulesExtractor:
             # Parse response
             response_text = response.content
 
+            # Ensure response_text is string
+            if not isinstance(response_text, str):
+                response_text = str(response_text)
+
             # Coba extract JSON dari response
             json_start = response_text.find("{")
             json_end = response_text.rfind("}") + 1
 
             if json_start != -1 and json_end != -1:
                 json_text = response_text[json_start:json_end]
-                rules = json.loads(json_text)
+                try:
+                    rules = json.loads(json_text)
+                    st.success("✅ JSON berhasil di-parse")
+                except json.JSONDecodeError as e:
+                    st.warning(f"⚠️ JSON parsing gagal: {str(e)}")
+                    rules = self._create_fallback_rules()
             else:
-                # Fallback: buat struktur default jika parsing gagal
+                st.warning(
+                    "⚠️ JSON tidak ditemukan dalam response, menggunakan fallback rules"
+                )
                 rules = self._create_fallback_rules()
 
             # Normalisasi dan validasi rules
@@ -180,6 +218,7 @@ class FormatRulesExtractor:
 
             # Simpan ke cache
             self._save_to_cache(cache_key, rules)
+            st.success("💾 Hasil disimpan ke cache")
 
             return rules
 
@@ -237,45 +276,333 @@ class FormatRulesExtractor:
 class TemplateGenerator:
     """Generate template dokumen berdasarkan aturan format"""
 
+    def __init__(self):
+        """Initialize template generator with color utilities"""
+        pass
+
+    def _hex_to_rgb(self, hex_color: str) -> tuple:
+        """Convert hex color to RGB tuple"""
+        try:
+            hex_color = hex_color.lstrip("#")
+            if len(hex_color) == 6:
+                return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+            return (0, 0, 0)  # Default to black
+        except:
+            return (0, 0, 0)  # Default to black
+
+    def _is_light_color(self, rgb_color: tuple) -> bool:
+        """Determine if a color is light (using relative luminance)"""
+        r, g, b = rgb_color
+        # Calculate relative luminance using sRGB formula
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        return luminance > 0.5
+
+    def _get_font_color_for_background(self, bg_color: str) -> tuple:
+        """Get appropriate font color (black or white) based on background"""
+        if not bg_color or bg_color.lower() in ["white", "#ffffff", "#fff"]:
+            return (0, 0, 0)  # Black for white/light backgrounds
+
+        rgb = self._hex_to_rgb(bg_color)
+        if self._is_light_color(rgb):
+            return (0, 0, 0)  # Black for light backgrounds
+        else:
+            return (255, 255, 255)  # White for dark backgrounds
+
+    def _apply_font_formatting(self, run, font_info: dict, bg_color: str = "#ffffff"):
+        """Apply comprehensive font formatting to a run"""
+        # Font family
+        if "family" in font_info:
+            run.font.name = font_info["family"]
+
+        # Font size
+        if "body_size" in font_info:
+            run.font.size = Pt(font_info["body_size"])
+        elif "size" in font_info:
+            run.font.size = Pt(font_info["size"])
+
+        # Font color based on background
+        font_color = self._get_font_color_for_background(bg_color)
+        run.font.color.rgb = RGBColor(*font_color)
+
+        # Bold
+        if font_info.get("bold", False):
+            run.font.bold = True
+
+        # Italic
+        if font_info.get("italic", False):
+            run.font.italic = True
+
+        # Underline
+        if font_info.get("underline", False):
+            run.font.underline = True
+
+    def _apply_paragraph_formatting(self, paragraph, spacing_info: dict):
+        """Apply paragraph spacing and alignment"""
+        paragraph_format = paragraph.paragraph_format
+
+        # Line spacing
+        line_spacing = spacing_info.get("line_spacing", 1.5)
+        if isinstance(line_spacing, str):
+            if "setengah" in line_spacing.lower() or "1.5" in line_spacing:
+                line_spacing = 1.5
+            elif "double" in line_spacing.lower() or "2" in line_spacing:
+                line_spacing = 2.0
+            else:
+                line_spacing = 1.5
+        paragraph_format.line_spacing = line_spacing
+
+        # Space after paragraph
+        space_after = spacing_info.get("after_paragraph", 6)
+        if isinstance(space_after, str):
+            try:
+                space_after = float(re.findall(r"[\d.]+", space_after)[0])
+            except:
+                space_after = 6
+        paragraph_format.space_after = Pt(space_after)
+
+        # Space before paragraph
+        space_before = spacing_info.get("before_paragraph", 0)
+        if isinstance(space_before, str):
+            try:
+                space_before = float(re.findall(r"[\d.]+", space_before)[0])
+            except:
+                space_before = 0
+        paragraph_format.space_before = Pt(space_before)
+
+    def _apply_page_formatting(self, doc, rules: dict):
+        """Apply page-level formatting (margins, orientation, page size, etc.)"""
+        sections = doc.sections
+        for section in sections:
+            # Set page size to A4 explicitly
+            section.page_width = Cm(21.0)  # A4 width: 21 cm
+            section.page_height = Cm(29.7)  # A4 height: 29.7 cm
+
+            # Page orientation
+            orientation = rules.get("page_orientation", "portrait")
+            if "landscape" in orientation.lower():
+                section.orientation = WD_ORIENT.LANDSCAPE
+                # Swap dimensions for landscape
+                section.page_width = Cm(29.7)
+                section.page_height = Cm(21.0)
+            else:
+                section.orientation = WD_ORIENT.PORTRAIT
+
+            # Margins - Apply with more explicit conversion
+            margins = rules.get("margin", {})
+
+            # Top margin
+            if "top" in margins:
+                top_margin = margins["top"]
+                if isinstance(top_margin, str):
+                    try:
+                        top_margin = float(re.findall(r"[\d.]+", top_margin)[0])
+                    except:
+                        top_margin = 3.0  # Default fallback
+                section.top_margin = Cm(float(top_margin))
+
+            # Bottom margin
+            if "bottom" in margins:
+                bottom_margin = margins["bottom"]
+                if isinstance(bottom_margin, str):
+                    try:
+                        bottom_margin = float(re.findall(r"[\d.]+", bottom_margin)[0])
+                    except:
+                        bottom_margin = 3.0  # Default fallback
+                section.bottom_margin = Cm(float(bottom_margin))
+
+            # Left margin
+            if "left" in margins:
+                left_margin = margins["left"]
+                if isinstance(left_margin, str):
+                    try:
+                        left_margin = float(re.findall(r"[\d.]+", left_margin)[0])
+                    except:
+                        left_margin = 3.0  # Default fallback
+                section.left_margin = Cm(float(left_margin))
+
+            # Right margin
+            if "right" in margins:
+                right_margin = margins["right"]
+                if isinstance(right_margin, str):
+                    try:
+                        right_margin = float(re.findall(r"[\d.]+", right_margin)[0])
+                    except:
+                        right_margin = 3.0  # Default fallback
+                section.right_margin = Cm(float(right_margin))
+
     def generate_template(self, rules: Dict[str, Any]) -> BytesIO:
-        """Generate template Word document"""
+        """Generate template Word document with comprehensive formatting"""
         try:
             # Create new document
             doc = Document()
 
-            # Set page margins
-            margins = rules.get("margin", {})
-            sections = doc.sections
-            for section in sections:
-                section.top_margin = Inches(margins.get("top", 3) / 2.54)
-                section.bottom_margin = Inches(margins.get("bottom", 3) / 2.54)
-                section.left_margin = Inches(margins.get("left", 3) / 2.54)
-                section.right_margin = Inches(margins.get("right", 3) / 2.54)
+            # Apply page formatting first
+            self._apply_page_formatting(doc, rules)
 
-            # Add title
-            title = doc.add_heading("TEMPLATE DOKUMEN", level=1)
+            # Get formatting info
+            font_info = rules.get("font", {})
+            spacing_info = rules.get("spacing", {})
+            bg_color = rules.get("background_color", "#ffffff")
+
+            # Add title with special formatting
+            title_text = rules.get("title", "TEMPLATE DOKUMEN")
+            title = doc.add_heading(title_text, level=0)
             title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+            # Format title
+            for run in title.runs:
+                title_font_info = font_info.copy()
+                title_font_info["size"] = font_info.get(
+                    "title_size", font_info.get("body_size", 12) + 2
+                )
+                title_font_info["bold"] = True
+                self._apply_font_formatting(run, title_font_info, bg_color)
+
+            # Apply spacing to title
+            self._apply_paragraph_formatting(title, spacing_info)
 
             # Add document structure based on rules
             structure = rules.get("document_structure", [])
+
             for item in structure:
-                if "BAB" in item.upper():
+                if "BAB" in item.upper() or "CHAPTER" in item.upper():
+                    # Main chapter heading
                     heading = doc.add_heading(item, level=1)
                     heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
 
-                    # Add sample content
-                    p = doc.add_paragraph("\\n[Konten untuk bagian ini]\\n")
+                    # Format chapter heading
+                    for run in heading.runs:
+                        chapter_font_info = font_info.copy()
+                        chapter_font_info["size"] = font_info.get(
+                            "heading_size", font_info.get("body_size", 12) + 1
+                        )
+                        chapter_font_info["bold"] = True
+                        self._apply_font_formatting(run, chapter_font_info, bg_color)
+
+                    self._apply_paragraph_formatting(heading, spacing_info)
+
+                    # Add sample content paragraph
+                    content_para = doc.add_paragraph(
+                        "\\n[Konten untuk bagian ini akan diisi sesuai dengan panduan format yang telah diekstrak]\\n"
+                    )
+
+                    # Format content paragraph
+                    for run in content_para.runs:
+                        self._apply_font_formatting(run, font_info, bg_color)
+                    self._apply_paragraph_formatting(content_para, spacing_info)
 
                 else:
-                    doc.add_heading(item, level=2)
-                    doc.add_paragraph("\\n[Konten akan diisi di sini]\\n")
+                    # Sub-heading
+                    sub_heading = doc.add_heading(item, level=2)
 
-            # Set font for all paragraphs
-            font_info = rules.get("font", {})
-            for paragraph in doc.paragraphs:
-                for run in paragraph.runs:
-                    run.font.name = font_info.get("family", "Times New Roman")
-                    run.font.size = Pt(font_info.get("body_size", 12))
+                    # Format sub-heading
+                    for run in sub_heading.runs:
+                        sub_font_info = font_info.copy()
+                        sub_font_info["size"] = font_info.get(
+                            "subheading_size", font_info.get("body_size", 12)
+                        )
+                        sub_font_info["bold"] = True
+                        self._apply_font_formatting(run, sub_font_info, bg_color)
+
+                    self._apply_paragraph_formatting(sub_heading, spacing_info)
+
+                    # Add sample content
+                    content_para = doc.add_paragraph(
+                        "\\n[Konten akan diisi di sini sesuai format yang diekstrak]\\n"
+                    )
+
+                    # Format content paragraph
+                    for run in content_para.runs:
+                        self._apply_font_formatting(run, font_info, bg_color)
+                    self._apply_paragraph_formatting(content_para, spacing_info)
+
+            # If no structure provided, add default sections
+            if not structure:
+                default_sections = [
+                    "PENDAHULUAN",
+                    "TINJAUAN PUSTAKA",
+                    "METODOLOGI",
+                    "HASIL DAN PEMBAHASAN",
+                    "KESIMPULAN",
+                ]
+
+                for section in default_sections:
+                    heading = doc.add_heading(section, level=1)
+                    heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+                    # Format heading
+                    for run in heading.runs:
+                        heading_font_info = font_info.copy()
+                        heading_font_info["size"] = font_info.get(
+                            "heading_size", font_info.get("body_size", 12) + 1
+                        )
+                        heading_font_info["bold"] = True
+                        self._apply_font_formatting(run, heading_font_info, bg_color)
+
+                    self._apply_paragraph_formatting(heading, spacing_info)
+
+                    # Add content paragraph
+                    content_para = doc.add_paragraph(
+                        "\\n[Isi konten sesuai dengan aturan format yang diekstrak]\\n"
+                    )
+
+                    # Format content
+                    for run in content_para.runs:
+                        self._apply_font_formatting(run, font_info, bg_color)
+                    self._apply_paragraph_formatting(content_para, spacing_info)
+
+            # Add a formatting summary paragraph at the end
+            doc.add_page_break()
+            summary_heading = doc.add_heading(
+                "RINGKASAN FORMAT YANG DITERAPKAN", level=1
+            )
+            summary_heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+            # Format summary heading
+            for run in summary_heading.runs:
+                summary_font_info = font_info.copy()
+                summary_font_info["size"] = font_info.get(
+                    "heading_size", font_info.get("body_size", 12) + 1
+                )
+                summary_font_info["bold"] = True
+                self._apply_font_formatting(run, summary_font_info, bg_color)
+
+            # Add formatting details
+            format_details = []
+            if font_info:
+                format_details.append(f"Font: {font_info.get('family', 'Default')}")
+                format_details.append(
+                    f"Ukuran Font: {font_info.get('body_size', 12)} pt"
+                )
+
+            if rules.get("margin"):
+                margins = rules["margin"]
+                format_details.append(
+                    f"Margin - Atas: {margins.get('top', 'default')} cm, Bawah: {margins.get('bottom', 'default')} cm"
+                )
+                format_details.append(
+                    f"Margin - Kiri: {margins.get('left', 'default')} cm, Kanan: {margins.get('right', 'default')} cm"
+                )
+
+            if spacing_info:
+                format_details.append(
+                    f"Spasi Antar Baris: {spacing_info.get('line_spacing', 1.5)}"
+                )
+                format_details.append(
+                    f"Spasi Setelah Paragraf: {spacing_info.get('after_paragraph', 6)} pt"
+                )
+
+            summary_text = (
+                "\\n".join(format_details)
+                if format_details
+                else "Format default diterapkan."
+            )
+            summary_para = doc.add_paragraph(summary_text)
+
+            # Format summary paragraph
+            for run in summary_para.runs:
+                self._apply_font_formatting(run, font_info, bg_color)
+            self._apply_paragraph_formatting(summary_para, spacing_info)
 
             # Save to BytesIO
             doc_io = BytesIO()
@@ -341,6 +668,7 @@ def main():
         border-radius: 10px;
         padding: 1rem;
         margin: 1rem 0;
+        color: #000000;
     }
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -350,6 +678,126 @@ def main():
         padding: 0.75rem 2rem;
         font-weight: 600;
         width: 100%;
+    }
+    /* Custom styling for black text elements */
+    .stSubheader {
+        color: #000000 !important;
+    }
+    .stInfo {
+        color: #000000 !important;
+    }
+    .stInfo > div {
+        color: #000000 !important;
+    }
+    .stSuccess {
+        color: #000000 !important;
+    }
+    .stSuccess > div {
+        color: #000000 !important;
+    }
+    /* Ensure text in file info is black */
+    .file-info strong {
+        color: #000000;
+    }
+    /* Style file uploader widget text */
+    .stFileUploader > div > div > div > div {
+        color: #000000 !important;
+    }
+    .stFileUploader label {
+        color: #000000 !important;
+    }
+    .stFileUploader div[data-testid="stFileUploaderDropzone"] {
+        color: #000000 !important;
+    }
+    .stFileUploader div[data-testid="stFileUploaderDropzone"] > div {
+        color: #000000 !important;
+    }
+    .stFileUploader span {
+        color: #000000 !important;
+    }
+    /* Style file uploader file name and size */
+    .stFileUploader div[data-testid="fileUploaderFile"] {
+        color: #000000 !important;
+    }
+    .stFileUploader div[data-testid="fileUploaderFile"] > div {
+        color: #000000 !important;
+    }
+    .stFileUploader div[data-testid="fileUploaderFile"] span {
+        color: #000000 !important;
+    }
+    /* Target specific file name element */
+    .stFileUploaderFileName {
+        color: #000000 !important;
+    }
+    div[data-testid="stFileUploaderFileName"] {
+        color: #000000 !important;
+    }
+    .st-emotion-cache-1uixxvy {
+        color: #000000 !important;
+    }
+    /* Additional file uploader text styling */
+    .stFileUploader div[title*=".docx"] {
+        color: #000000 !important;
+    }
+    .stFileUploader div[title*=".txt"] {
+        color: #000000 !important;
+    }
+    .stFileUploader div.e16xj5sw9 {
+        color: #000000 !important;
+    }
+    /* Style "Drag and drop file here" text */
+    .st-emotion-cache-9ycgxx {
+        color: #ffffff !important;
+    }
+    span.st-emotion-cache-9ycgxx {
+        color: #ffffff !important;
+    }
+    .e16xj5sw3 {
+        color: #ffffff !important;
+    }
+    /* Hide uploaded file display area */
+    .st-emotion-cache-fis6aj {
+        display: none !important;
+    }
+    .stFileUploaderFile {
+        display: none !important;
+    }
+    div[data-testid="stFileUploaderFile"] {
+        display: none !important;
+    }
+    .e16xj5sw10 {
+        display: none !important;
+    }
+    /* Hide the entire uploaded file list */
+    .st-emotion-cache-14m29r0 {
+        display: none !important;
+    }
+    .e16xj5sw6 {
+        display: none !important;
+    }
+    /* Hide empty upload section container */
+    .st-emotion-cache-v3w3zg {
+        display: none !important;
+    }
+    .stElementContainer[data-testid="stElementContainer"] .upload-section:empty {
+        display: none !important;
+    }
+    .stMarkdown .upload-section:empty {
+        display: none !important;
+    }
+    /* Additional hiding for empty upload containers */
+    div[data-testid="stMarkdownContainer"] .upload-section:only-child {
+        display: none !important;
+    }
+    /* Style expander text */
+    .stExpander > div > div > div {
+        color: #000000 !important;
+    }
+    .stExpander summary {
+        color: #000000 !important;
+    }
+    .stExpander details summary {
+        color: #000000 !important;
     }
     </style>
     """,
@@ -371,7 +819,10 @@ def main():
     st.markdown('<div class="upload-section">', unsafe_allow_html=True)
 
     # File upload
-    st.subheader("📤 Upload Dokumen Panduan")
+    st.markdown(
+        '<h3 style="color: #000000;">📤 Upload Dokumen Panduan</h3>',
+        unsafe_allow_html=True,
+    )
     uploaded_file = st.file_uploader(
         "Pilih file dokumen panduan",
         type=["txt", "docx"],
@@ -384,24 +835,39 @@ def main():
         # File info
         st.markdown(
             f"""
-            <div class="file-info">
-                <strong>📁 File:</strong> {uploaded_file.name}<br>
-                <strong>📏 Ukuran:</strong> {uploaded_file.size / 1024:.2f} KB
+            <div class="file-info" style="color: #000000;">
+                <strong style="color: #000000;">📁 File:</strong> {uploaded_file.name}<br>
+                <strong style="color: #000000;">📏 Ukuran:</strong> {uploaded_file.size / 1024:.2f} KB
             </div>
             """,
             unsafe_allow_html=True,
         )
 
         # Save uploaded file temporarily
-        temp_dir = tempfile.mkdtemp()
-        temp_file_path = os.path.join(temp_dir, uploaded_file.name)
+        try:
+            temp_dir = tempfile.mkdtemp()
+            temp_file_path = os.path.join(temp_dir, uploaded_file.name)
 
-        with open(temp_file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+            with open(temp_file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+
+            st.markdown(
+                '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">✅ File berhasil disimpan: '
+                + uploaded_file.name
+                + "</p>",
+                unsafe_allow_html=True,
+            )
+        except Exception as e:
+            st.error(f"❌ Error menyimpan file: {str(e)}")
+            st.stop()
 
         # Initialize components
-        extractor = FormatRulesExtractor()
-        generator = TemplateGenerator()
+        try:
+            extractor = FormatRulesExtractor()
+            generator = TemplateGenerator()
+        except Exception as e:
+            st.error(f"❌ Error initializing components: {str(e)}")
+            st.stop()
 
         # Button columns
         col1, col2 = st.columns(2)
@@ -412,11 +878,20 @@ def main():
                     try:
                         rules = extractor.extract_rules_with_ai(temp_file_path)
                         st.session_state.extracted_rules = rules
-                        st.success("✅ Aturan format berhasil diekstrak!")
+                        st.markdown(
+                            '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">✅ Aturan format berhasil diekstrak!</p>',
+                            unsafe_allow_html=True,
+                        )
 
                         # Display rules
-                        with st.expander("📋 Lihat Aturan yang Diekstrak"):
+                        with st.expander(
+                            "📋 Lihat Aturan yang Diekstrak", expanded=False
+                        ):
+                            st.markdown(
+                                '<div style="color: #000000;">', unsafe_allow_html=True
+                            )
                             st.json(rules)
+                            st.markdown("</div>", unsafe_allow_html=True)
 
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
@@ -431,7 +906,10 @@ def main():
                         rules = st.session_state.extracted_rules
                         template_io = generator.generate_template(rules)
 
-                        st.success("✅ Template berhasil dibuat!")
+                        st.markdown(
+                            '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">✅ Template berhasil dibuat!</p>',
+                            unsafe_allow_html=True,
+                        )
 
                         # Download button
                         st.download_button(
@@ -446,17 +924,26 @@ def main():
 
         # Cleanup
         try:
-            os.remove(temp_file_path)
-            os.rmdir(temp_dir)
-        except:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
+        except Exception as e:
+            # Silent cleanup - tidak perlu error jika gagal cleanup
             pass
 
     else:
         # Instructions when no file uploaded
-        st.info("👆 Silakan upload dokumen panduan format untuk memulai")
+        st.markdown(
+            '<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">👆 Silakan upload dokumen panduan format untuk memulai</p>',
+            unsafe_allow_html=True,
+        )
 
         # Example download
-        st.subheader("📥 Contoh Dokumen Panduan")
+        st.markdown(
+            '<h3 style="color: #000000;">📥 Contoh Dokumen Panduan</h3>',
+            unsafe_allow_html=True,
+        )
         example_content = """PANDUAN FORMAT DOKUMEN
 
 1. MARGIN
@@ -490,6 +977,33 @@ def main():
             file_name="contoh_panduan.txt",
             mime="text/plain",
         )
+
+    # Debug info di sidebar (opsional)
+    with st.sidebar:
+        if st.checkbox("🔧 Debug Info", value=False):
+            st.write("**Environment:**")
+            st.write(f"- Python: {sys.version[:20]}...")
+            st.write(f"- Streamlit: {st.__version__}")
+            st.write(f"- Working Dir: {os.getcwd()}")
+
+            # Check API key
+            try:
+                api_key = st.secrets.get("GOOGLE_API_KEY") or os.getenv(
+                    "GOOGLE_API_KEY"
+                )
+                if api_key:
+                    st.success("✅ API Key tersedia")
+                else:
+                    st.error("❌ API Key tidak ditemukan")
+            except:
+                st.warning("⚠️ Error checking API key")
+
+            # Check cache dir
+            if os.path.exists("cache"):
+                cache_files = len(os.listdir("cache"))
+                st.info(f"📋 Cache files: {cache_files}")
+            else:
+                st.info("📋 Cache directory: tidak ada")
 
 
 if __name__ == "__main__":
