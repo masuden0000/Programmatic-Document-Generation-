@@ -132,7 +132,10 @@ class FormatRulesExtractor:
             full_text = full_text[:12000] + "..."
             st.warning(f"📏 Dokumen dipotong ke {len(full_text)} karakter pertama")
 
-        st.info(f"📊 Memproses {len(full_text)} karakter teks...")
+        st.markdown(
+            f'<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">📊 Memproses {len(full_text)} karakter teks...</p>',
+            unsafe_allow_html=True,
+        )
 
         # Prompt yang lebih komprehensif dan detail
         prompt = f"""
@@ -174,9 +177,15 @@ class FormatRulesExtractor:
             response = None
             for attempt in range(3):
                 try:
-                    st.info(f"🤖 Mengirim ke Gemini AI... (Percobaan {attempt + 1}/3)")
+                    st.markdown(
+                        f'<p style="color: #000000; background-color: #d1ecf1; padding: 10px; border-radius: 5px; border: 1px solid #bee5eb;">🤖 Mengirim ke Gemini AI... (Percobaan {attempt + 1}/3)</p>',
+                        unsafe_allow_html=True,
+                    )
                     response = self.llm.invoke(messages)
-                    st.success("✅ Response diterima dari Gemini AI")
+                    st.markdown(
+                        '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">✅ Response diterima dari Gemini AI</p>',
+                        unsafe_allow_html=True,
+                    )
                     break
                 except Exception as e:
                     if attempt == 2:
@@ -203,7 +212,10 @@ class FormatRulesExtractor:
                 json_text = response_text[json_start:json_end]
                 try:
                     rules = json.loads(json_text)
-                    st.success("✅ JSON berhasil di-parse")
+                    st.markdown(
+                        '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">✅ JSON berhasil di-parse</p>',
+                        unsafe_allow_html=True,
+                    )
                 except json.JSONDecodeError as e:
                     st.warning(f"⚠️ JSON parsing gagal: {str(e)}")
                     rules = self._create_fallback_rules()
@@ -218,7 +230,10 @@ class FormatRulesExtractor:
 
             # Simpan ke cache
             self._save_to_cache(cache_key, rules)
-            st.success("💾 Hasil disimpan ke cache")
+            st.markdown(
+                '<p style="color: #000000; background-color: #d4edda; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb;">💾 Hasil disimpan ke cache</p>',
+                unsafe_allow_html=True,
+            )
 
             return rules
 
@@ -670,6 +685,9 @@ def main():
         margin: 1rem 0;
         color: #000000;
     }
+    .file-info strong {
+        color: #000000;
+    }
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -679,10 +697,88 @@ def main():
         font-weight: 600;
         width: 100%;
     }
+    
     /* Custom styling for black text elements */
     .stSubheader {
         color: #000000 !important;
     }
+    .stSubheader h3 {
+        color: #000000 !important;
+    }
+    h3[id="upload-dokumen-panduan"] {
+        color: #000000 !important;
+    }
+    
+    /* Hide uploaded file display area completely */
+    .st-emotion-cache-fis6aj {
+        display: none !important;
+    }
+    .stFileUploaderFile {
+        display: none !important;
+    }
+    div[data-testid="stFileUploaderFile"] {
+        display: none !important;
+    }
+    .st-emotion-cache-14m29r0 {
+        display: none !important;
+    }
+    .e16xj5sw6 {
+        display: none !important;
+    }
+    .e16xj5sw5 {
+        display: none !important;
+    }
+    
+    /* Success and info alert messages - black text */
+    .stAlert {
+        color: #000000 !important;
+    }
+    .stAlert > div {
+        color: #000000 !important;
+    }
+    .stAlert p {
+        color: #000000 !important;
+    }
+    div[data-testid="stAlertContentSuccess"] {
+        color: #000000 !important;
+    }
+    div[data-testid="stAlertContentSuccess"] p {
+        color: #000000 !important;
+    }
+    div[data-testid="stAlertContentInfo"] {
+        color: #000000 !important;
+    }
+    div[data-testid="stAlertContentInfo"] p {
+        color: #000000 !important;
+    }
+    .st-emotion-cache-1w7qfeb p {
+        color: #000000 !important;
+    }
+    
+    /* Expander text styling */
+    .stExpander {
+        color: #000000 !important;
+    }
+    .stExpander > div {
+        color: #000000 !important;
+    }
+    .stExpander summary {
+        color: #000000 !important;
+    }
+    .stExpander details summary {
+        color: #000000 !important;
+    }
+    .st-emotion-cache-1dtefog {
+        color: #000000 !important;
+    }
+    .st-emotion-cache-1dtefog p {
+        color: #000000 !important;
+    }
+    .st-emotion-cache-1ort0lt p {
+        color: #000000 !important;
+    }
+    
+    /* Info and success message containers */
     .stInfo {
         color: #000000 !important;
     }
@@ -693,110 +789,6 @@ def main():
         color: #000000 !important;
     }
     .stSuccess > div {
-        color: #000000 !important;
-    }
-    /* Ensure text in file info is black */
-    .file-info strong {
-        color: #000000;
-    }
-    /* Style file uploader widget text */
-    .stFileUploader > div > div > div > div {
-        color: #000000 !important;
-    }
-    .stFileUploader label {
-        color: #000000 !important;
-    }
-    .stFileUploader div[data-testid="stFileUploaderDropzone"] {
-        color: #000000 !important;
-    }
-    .stFileUploader div[data-testid="stFileUploaderDropzone"] > div {
-        color: #000000 !important;
-    }
-    .stFileUploader span {
-        color: #000000 !important;
-    }
-    /* Style file uploader file name and size */
-    .stFileUploader div[data-testid="fileUploaderFile"] {
-        color: #000000 !important;
-    }
-    .stFileUploader div[data-testid="fileUploaderFile"] > div {
-        color: #000000 !important;
-    }
-    .stFileUploader div[data-testid="fileUploaderFile"] span {
-        color: #000000 !important;
-    }
-    /* Target specific file name element */
-    .stFileUploaderFileName {
-        color: #000000 !important;
-    }
-    div[data-testid="stFileUploaderFileName"] {
-        color: #000000 !important;
-    }
-    .st-emotion-cache-1uixxvy {
-        color: #000000 !important;
-    }
-    /* Additional file uploader text styling */
-    .stFileUploader div[title*=".docx"] {
-        color: #000000 !important;
-    }
-    .stFileUploader div[title*=".txt"] {
-        color: #000000 !important;
-    }
-    .stFileUploader div.e16xj5sw9 {
-        color: #000000 !important;
-    }
-    /* Style "Drag and drop file here" text */
-    .st-emotion-cache-9ycgxx {
-        color: #ffffff !important;
-    }
-    span.st-emotion-cache-9ycgxx {
-        color: #ffffff !important;
-    }
-    .e16xj5sw3 {
-        color: #ffffff !important;
-    }
-    /* Hide uploaded file display area */
-    .st-emotion-cache-fis6aj {
-        display: none !important;
-    }
-    .stFileUploaderFile {
-        display: none !important;
-    }
-    div[data-testid="stFileUploaderFile"] {
-        display: none !important;
-    }
-    .e16xj5sw10 {
-        display: none !important;
-    }
-    /* Hide the entire uploaded file list */
-    .st-emotion-cache-14m29r0 {
-        display: none !important;
-    }
-    .e16xj5sw6 {
-        display: none !important;
-    }
-    /* Hide empty upload section container */
-    .st-emotion-cache-v3w3zg {
-        display: none !important;
-    }
-    .stElementContainer[data-testid="stElementContainer"] .upload-section:empty {
-        display: none !important;
-    }
-    .stMarkdown .upload-section:empty {
-        display: none !important;
-    }
-    /* Additional hiding for empty upload containers */
-    div[data-testid="stMarkdownContainer"] .upload-section:only-child {
-        display: none !important;
-    }
-    /* Style expander text */
-    .stExpander > div > div > div {
-        color: #000000 !important;
-    }
-    .stExpander summary {
-        color: #000000 !important;
-    }
-    .stExpander details summary {
         color: #000000 !important;
     }
     </style>
@@ -814,9 +806,6 @@ def main():
     """,
         unsafe_allow_html=True,
     )
-
-    # Main upload area
-    st.markdown('<div class="upload-section">', unsafe_allow_html=True)
 
     # File upload
     st.markdown(
